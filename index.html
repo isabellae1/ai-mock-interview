@@ -65,8 +65,15 @@
       <textarea id="jd" rows="6" placeholder="把招聘页面上的岗位职责和岗位要求粘贴过来"></textarea>
     </label>
     <label>简历（可选）
-      <textarea id="resume" rows="5" placeholder="粘贴简历文字，AI 会针对你的经历出题。请先删掉身份证号、电话、邮箱等信息。"></textarea>
+      <textarea id="resume" rows="5" placeholder="上传简历文件，或直接粘贴简历文字。AI 会针对你的经历出题。"></textarea>
     </label>
+    <div class="upload">
+      <label class="filebtn">📎 上传简历（PDF / Word / TXT）
+        <input id="resumeFile" type="file" accept=".pdf,.docx,.txt,.md">
+      </label>
+      <span class="muted small">文件只在你的浏览器里读取，不会上传。手机号、邮箱、身份证号会自动隐藏。</span>
+    </div>
+    <div id="resumeStatus" class="status"></div>
     <div class="actions">
       <button id="generateBtn">🔍 搜索并生成题目</button>
       <button class="ghost" id="bankBtn">使用通用题库</button>

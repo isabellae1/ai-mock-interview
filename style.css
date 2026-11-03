@@ -79,3 +79,11 @@ button:disabled { opacity: .5; cursor: default; }
 .turn { border-left: 3px solid var(--line); padding-left: 10px; margin-bottom: 10px; font-size: 14px; }
 
 .foot { text-align: center; font-size: 13px; padding: 16px; }
+
+.upload { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: -4px; }
+.filebtn {
+  display: inline-block; margin: 0; padding: 6px 12px; cursor: pointer;
+  border: 1px dashed var(--accent); border-radius: 8px; color: var(--accent); font-size: 14px;
+}
+.filebtn input { display: none; }
+.small { font-size: 13px; }

@@ -637,6 +637,117 @@ function saveSettings() {
   $('settingsPanel').classList.add('hidden');
 }
 
+// ---------------- 简历文件读取（在浏览器本地完成） ----------------
+// 解析库按需加载；优先国内可访问的 npmmirror，失败时改用其他 CDN
+const CDN_TEMPLATES = [
+  (pkg, ver, path) => `https://registry.npmmirror.com/${pkg}/${ver}/files/${path}`,
+  (pkg, ver, path) => `https://cdn.jsdelivr.net/npm/${pkg}@${ver}/${path}`,
+  (pkg, ver, path) => `https://unpkg.com/${pkg}@${ver}/${path}`,
+];
+const LIBS = {
+  pdf: { pkg: 'pdfjs-dist', ver: '3.11.174', path: 'build/pdf.min.js', worker: 'build/pdf.worker.min.js', global: 'pdfjsLib' },
+  docx: { pkg: 'mammoth', ver: '1.8.0', path: 'mammoth.browser.min.js', global: 'mammoth' },
+};
+const libCache = {};
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => { s.remove(); reject(new Error('load failed')); };
+    document.head.appendChild(s);
+  });
+}
+
+async function loadLib(name) {
+  if (libCache[name]) return libCache[name];
+  const lib = LIBS[name];
+  for (const tpl of CDN_TEMPLATES) {
+    try {
+      await loadScript(tpl(lib.pkg, lib.ver, lib.path));
+      if (!window[lib.global]) continue;
+      if (lib.worker) {
+        // Worker 不能直接跨域加载，先下载代码再转成本地 Blob 地址
+        const code = await (await fetch(tpl(lib.pkg, lib.ver, lib.worker))).text();
+        window[lib.global].GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+      }
+      libCache[name] = window[lib.global];
+      return libCache[name];
+    } catch { /* 换下一个 CDN */ }
+  }
+  throw new Error('解析组件加载失败，请检查网络，或直接把简历文字粘贴进来。');
+}
+
+async function readPdf(file) {
+  const pdfjs = await loadLib('pdf');
+  const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  const pages = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const content = await (await doc.getPage(i)).getTextContent();
+    pages.push(content.items.map((it) => it.str + (it.hasEOL ? '\n' : '')).join(''));
+  }
+  return pages.join('\n');
+}
+
+async function readDocx(file) {
+  const mammoth = await loadLib('docx');
+  const r = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+  return r.value;
+}
+
+// 自动隐藏手机号、邮箱、身份证号
+function maskPII(text) {
+  let count = 0;
+  const rules = [
+    [/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, '【邮箱已隐藏】'],
+    [/(?<![\dA-Za-z])\d{17}[\dXx](?![\dA-Za-z])/g, '【身份证号已隐藏】'],
+    [/(?<!\d)(\+?86[\s-]?)?1[3-9]\d[\s-]?\d{4}[\s-]?\d{4}(?!\d)/g, '【手机号已隐藏】'],
+    [/(?<!\d)(\+?61[\s-]?|0)4\d{2}[\s-]?\d{3}[\s-]?\d{3}(?!\d)/g, '【手机号已隐藏】'],
+  ];
+  for (const [re, rep] of rules) text = text.replace(re, () => { count++; return rep; });
+  return { text, count };
+}
+
+const RESUME_MAX_CHARS = 8000;
+
+async function handleResumeFile(file) {
+  const statusEl = $('resumeStatus');
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) { setStatus(statusEl, '文件超过 10MB，请换一个文件。', true); return; }
+  const ext = file.name.split('.').pop().toLowerCase();
+  setStatus(statusEl, '正在读取简历…');
+  try {
+    let text;
+    if (ext === 'pdf') text = await readPdf(file);
+    else if (ext === 'docx') text = await readDocx(file);
+    else if (ext === 'txt' || ext === 'md') text = await file.text();
+    else throw new Error('暂不支持这种格式，请上传 PDF、Word（.docx）或 TXT 文件。旧版 .doc 文件请先另存为 .docx。');
+
+    text = text
+      .replace(/[⺀-⿟]/g, (c) => c.normalize('NFKC')) // PDF 中常见的"康熙部首"字形还原为普通汉字
+      .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (text.length < 20) throw new Error('没有读取到文字。如果是扫描版或图片格式的 PDF，请直接把简历文字粘贴进来。');
+
+    const masked = maskPII(text);
+    let finalText = masked.text;
+    let cut = false;
+    if (finalText.length > RESUME_MAX_CHARS) { finalText = finalText.slice(0, RESUME_MAX_CHARS); cut = true; }
+
+    $('resume').value = finalText;
+    saveDraft();
+    const notes = [`已读取「${file.name}」，共 ${finalText.length} 字。`];
+    if (masked.count) notes.push(`已自动隐藏 ${masked.count} 处个人信息。`);
+    if (cut) notes.push(`内容较长，只保留了前 ${RESUME_MAX_CHARS} 字。`);
+    notes.push('请检查一下内容是否完整。');
+    setStatus(statusEl, notes.join(''));
+  } catch (e) {
+    setStatus(statusEl, e.message, true);
+  } finally {
+    $('resumeFile').value = '';
+  }
+}
+
 // ---------------- 绑定事件 ----------------
 function readForm() {
   return {
@@ -654,6 +765,7 @@ function init() {
   const draft = store.get('draft', null);
   if (draft) ['company', 'role', 'jd', 'resume'].forEach((k) => { $(k).value = draft[k] || ''; });
   ['company', 'role', 'jd', 'resume'].forEach((k) => $(k).addEventListener('input', saveDraft));
+  $('resumeFile').addEventListener('change', (e) => handleResumeFile(e.target.files[0]));
 
   if (!settings.apiKey) $('settingsPanel').classList.remove('hidden');
 
