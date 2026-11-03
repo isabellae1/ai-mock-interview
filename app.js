@@ -67,7 +67,7 @@ const store = {
 };
 
 const DEFAULT_SETTINGS = {
-  provider: 'qwen', apiKey: '', model: PROVIDERS.qwen.model,
+  provider: 'qwen', apiKey: '', baseUrl: '', model: PROVIDERS.qwen.model,
   qCount: 6, answerSec: 180, followups: 1, autoMic: true,
 };
 let settings = { ...DEFAULT_SETTINGS, ...store.get('settings', {}) };
@@ -103,6 +103,8 @@ function friendlyError(status, text) {
   return `模型服务返回错误（${status}）：${String(text).slice(0, 200)}`;
 }
 
+class NetworkError extends ApiError {}
+
 async function postJSON(url, body) {
   if (!settings.apiKey) throw new ApiError('请先在「设置」中填写 API Key。');
   let res;
@@ -113,25 +115,41 @@ async function postJSON(url, body) {
       body: JSON.stringify(body),
     });
   } catch {
-    throw new ApiError('网络请求失败，请检查网络连接。');
+    throw new NetworkError('网络请求失败，请检查网络连接或「设置」中的接口地址。');
   }
   const text = await res.text();
   if (!res.ok) throw new ApiError(friendlyError(res.status, text));
   try { return JSON.parse(text); } catch { throw new ApiError('模型服务返回的内容无法解析。'); }
 }
 
+// 用户填写的接口地址：去掉末尾的斜杠和多余的路径
+function customBase() {
+  return (settings.baseUrl || '').trim().replace(/\/+$/, '').replace(/\/(chat\/completions|responses)$/, '');
+}
+
+// 优先用用户填写的接口地址；如果被浏览器拦截（跨域或网络问题），自动改用默认地址再试一次
+async function callProvider(path, body) {
+  const p = PROVIDERS[settings.provider];
+  const custom = customBase();
+  if (custom && custom !== p.base) {
+    try { return await postJSON(custom + path, body); }
+    catch (e) { if (!(e instanceof NetworkError)) throw e; }
+  }
+  return postJSON(p.base + path, body);
+}
+
 async function chat(messages, { json = false, temperature = 0.7 } = {}) {
   const p = PROVIDERS[settings.provider];
   const body = { model: settings.model || p.model, messages, temperature };
   if (json) body.response_format = { type: 'json_object' };
-  const data = await postJSON(`${p.base}/chat/completions`, body);
+  const data = await callProvider('/chat/completions', body);
   return data?.choices?.[0]?.message?.content ?? '';
 }
 
 // 通义千问 Responses 接口 + web_search 工具：返回文本和真实检索到的网址
 async function searchAndAnswer(system, user) {
   const p = PROVIDERS.qwen;
-  const data = await postJSON(`${p.base}/responses`, {
+  const data = await callProvider('/responses', {
     model: settings.model || p.model,
     input: [{ role: 'system', content: system }, { role: 'user', content: user }],
     tools: [{ type: 'web_search' }],
@@ -595,6 +613,7 @@ function fillSettings() {
   $('provider').innerHTML = Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}">${p.name}</option>`).join('');
   $('provider').value = settings.provider;
   $('apiKey').value = settings.apiKey;
+  $('baseUrl').value = settings.baseUrl || '';
   $('model').value = settings.model;
   $('qCount').value = String(settings.qCount);
   $('answerSec').value = String(settings.answerSec);
@@ -607,6 +626,7 @@ function saveSettings() {
   settings = {
     provider: $('provider').value,
     apiKey: $('apiKey').value.trim(),
+    baseUrl: $('baseUrl').value.trim(),
     model: $('model').value.trim() || PROVIDERS[$('provider').value].model,
     qCount: Number($('qCount').value),
     answerSec: Number($('answerSec').value),
@@ -638,7 +658,7 @@ function init() {
   if (!settings.apiKey) $('settingsPanel').classList.remove('hidden');
 
   $('settingsBtn').onclick = () => $('settingsPanel').classList.toggle('hidden');
-  $('provider').onchange = () => { $('model').value = PROVIDERS[$('provider').value].model; };
+  $('provider').onchange = () => { $('model').value = PROVIDERS[$('provider').value].model; $('baseUrl').value = ''; };
   $('saveSettings').onclick = saveSettings;
   $('clearData').onclick = () => {
     store.clear();
