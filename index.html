@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 面试陪练</title>
+<meta name="description" content="根据公司、岗位和 JD 联网搜索出题，模拟 AI 视频面试的限时作答与追问，逐题评分。">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">AI 面试陪练 <span class="tag">v0.1</span></div>
+  <button class="ghost" id="settingsBtn">⚙ 设置</button>
+</header>
+
+<main id="app">
+
+  <!-- 设置 -->
+  <section id="settingsPanel" class="card hidden">
+    <h2>设置</h2>
+    <p class="muted">API Key 只保存在你自己的浏览器里，只会发送给你选择的模型服务商。</p>
+    <label>模型服务商
+      <select id="provider"></select>
+    </label>
+    <label>API Key
+      <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off">
+    </label>
+    <label>模型名称
+      <input id="model" type="text">
+      <small class="muted">一般保持默认即可。只有通义千问支持联网搜索面经。</small>
+    </label>
+    <div class="row">
+      <label>题目数量
+        <select id="qCount"><option>5</option><option selected>6</option><option>7</option><option>8</option></select>
+      </label>
+      <label>每题作答时长
+        <select id="answerSec">
+          <option value="60">1 分钟</option><option value="120">2 分钟</option>
+          <option value="180" selected>3 分钟</option><option value="300">5 分钟</option>
+        </select>
+      </label>
+      <label>每题追问次数
+        <select id="followups"><option value="0">不追问</option><option value="1" selected>1 次</option><option value="2">2 次</option></select>
+      </label>
+    </div>
+    <label class="check"><input id="autoMic" type="checkbox" checked> 作答时自动开启语音输入</label>
+    <div class="actions">
+      <button id="saveSettings">保存</button>
+      <button class="ghost danger" id="clearData">清除本地数据</button>
+    </div>
+  </section>
+
+  <!-- 第 1 步：输入岗位 -->
+  <section id="setupView" class="card">
+    <h2>1. 你要面试哪个岗位？</h2>
+    <div class="row">
+      <label>公司 <input id="company" placeholder="例如：平安健康险"></label>
+      <label>岗位 <input id="role" placeholder="例如：AI 赋能应届生"></label>
+    </div>
+    <label>岗位描述（JD）
+      <textarea id="jd" rows="6" placeholder="把招聘页面上的岗位职责和岗位要求粘贴过来"></textarea>
+    </label>
+    <label>简历（可选）
+      <textarea id="resume" rows="5" placeholder="粘贴简历文字，AI 会针对你的经历出题。请先删掉身份证号、电话、邮箱等信息。"></textarea>
+    </label>
+    <div class="actions">
+      <button id="generateBtn">🔍 搜索并生成题目</button>
+      <button class="ghost" id="bankBtn">使用通用题库</button>
+    </div>
+    <div id="genStatus" class="status"></div>
+  </section>
+
+  <!-- 第 2 步：确认题目 -->
+  <section id="reviewView" class="card hidden">
+    <h2>2. 确认题目</h2>
+    <div id="searchNote" class="note"></div>
+    <ol id="questionList" class="qlist"></ol>
+    <div class="row">
+      <input id="newQuestion" placeholder="添加一道自己的题目">
+      <button class="ghost" id="addQuestion">添加</button>
+    </div>
+    <div class="actions">
+      <button id="startBtn">开始模拟面试</button>
+      <button class="ghost" id="backToSetup">返回修改</button>
+    </div>
+  </section>
+
+  <!-- 第 3 步：面试 -->
+  <section id="interviewView" class="card hidden">
+    <div class="progress" id="progress"></div>
+    <div class="qbox">
+      <div class="qlabel" id="qLabel"></div>
+      <div class="qtext" id="qText"></div>
+    </div>
+    <div class="timer" id="timer"></div>
+    <div id="answerArea" class="hidden">
+      <textarea id="answer" rows="8" placeholder="开始说话，或在这里打字作答"></textarea>
+      <div class="actions">
+        <button class="ghost" id="micBtn">🎙 开启语音</button>
+        <button id="submitAnswer">提交回答</button>
+      </div>
+      <div id="micStatus" class="status"></div>
+    </div>
+    <div class="actions" id="prepActions">
+      <button class="ghost" id="skipPrep">跳过准备，直接作答</button>
+    </div>
+    <div id="interviewStatus" class="status"></div>
+  </section>
+
+  <!-- 单题反馈 -->
+  <section id="feedbackView" class="card hidden">
+    <h2>本题反馈</h2>
+    <div id="feedbackContent"></div>
+    <div class="actions">
+      <button id="nextQuestion">下一题</button>
+    </div>
+  </section>
+
+  <!-- 总结报告 -->
+  <section id="reportView" class="card hidden">
+    <h2>面试总结</h2>
+    <div id="reportContent"></div>
+    <div class="actions">
+      <button id="exportBtn">导出为 Markdown</button>
+      <button class="ghost" id="restartBtn">再练一轮</button>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot muted">
+  开源项目 · <a href="https://github.com/isabellae1/ai-mock-interview" target="_blank" rel="noopener">GitHub</a> · 本页面不设服务器，不收集任何数据
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

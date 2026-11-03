@@ -2,7 +2,17 @@
 
 > 输入公司、岗位和 JD，AI 联网搜索面经并出题，模拟 AI 视频面试的限时作答与追问，逐题评分并给出改进建议。
 
-🚧 **开发中**
+🚀 **在线使用**：[isabellae1.github.io/ai-mock-interview](https://isabellae1.github.io/ai-mock-interview/)（v0.1，开发中）
+
+## 使用方法
+
+1. 准备一个模型 API Key。推荐 [阿里云百炼](https://bailian.console.aliyun.com/)（通义千问），它支持联网搜索面经；也支持 Kimi 和 DeepSeek（不联网，只根据 JD 出题）
+2. 打开网页，在「设置」里填入 API Key
+3. 填写公司、岗位和 JD（可选：简历），点「搜索并生成题目」
+4. 确认题目后开始模拟：15 秒准备 → 限时作答（可语音或打字）→ AI 追问 → 评分
+5. 一轮结束后查看总结，导出为 Markdown 复盘
+
+建议使用 Chrome 或 Safari 的最新版本。
 
 ## 为什么做这个
 
