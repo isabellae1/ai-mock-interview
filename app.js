@@ -94,18 +94,38 @@ function normUrl(u) {
 }
 
 // ---------------- 调用模型 ----------------
-class ApiError extends Error {}
+class ApiError extends Error {
+  constructor(message, status = 0) { super(message); this.status = status; }
+}
+
+// 从服务器返回的内容里取出错误代码和原因，方便排查
+function serverReason(text) {
+  try {
+    const j = JSON.parse(text);
+    const e = j.error || j;
+    const parts = [e.code, e.message].filter(Boolean);
+    if (parts.length) return `服务器返回：${parts.join(' - ')}`;
+  } catch {}
+  return text ? `服务器返回：${String(text).slice(0, 200)}` : '';
+}
 
 function friendlyError(status, text) {
-  if (status === 401 || status === 403) {
+  return [friendlyHint(status), serverReason(text)].filter(Boolean).join(' ');
+}
+
+function friendlyHint(status) {
+  if (status === 403) {
+    return '没有权限（HTTP 403）：可能是这个模型或功能还没有开通、账户欠费，或 Key 不属于这个接口地址。';
+  }
+  if (status === 401) {
     const hint = settings.provider === 'qwen' && !customBase() && /^sk-ws-/.test(settings.apiKey)
       ? '你的 Key 是 sk-ws- 开头的业务空间 Key，请在「设置」的「接口地址」中填写百炼控制台显示的专属地址（https://ws-…）。'
       : '请在「设置」中检查 Key 是否正确、是否已被删除。';
     return `API Key 无效或没有权限（HTTP ${status}）。${hint}`;
   }
   if (status === 429) return '请求太频繁或额度不足，请稍后再试，或检查账户余额。';
-  if (status === 404) return '模型名称或接口地址不对，请在「设置」中检查模型名称。';
-  return `模型服务返回错误（${status}）：${String(text).slice(0, 200)}`;
+  if (status === 404) return '模型名称或接口地址不对，请在「设置」中检查模型名称和接口地址。';
+  return `模型服务返回错误（HTTP ${status}）。`;
 }
 
 class NetworkError extends ApiError {}
@@ -123,7 +143,7 @@ async function postJSON(url, body) {
     throw new NetworkError('网络请求失败，请检查网络连接或「设置」中的接口地址。');
   }
   const text = await res.text();
-  if (!res.ok) throw new ApiError(friendlyError(res.status, text));
+  if (!res.ok) throw new ApiError(friendlyError(res.status, text), res.status);
   try { return JSON.parse(text); } catch { throw new ApiError('模型服务返回的内容无法解析。'); }
 }
 
@@ -253,19 +273,25 @@ function enforceSources(questions, urls) {
 async function generateQuestions(form) {
   const p = PROVIDERS[settings.provider];
   const userMsg = questionUserMessage(form);
-  let text = '', urls = [], usedSearch = false, searchFailed = false;
+  let text = '', urls = [], usedSearch = false, searchError = '';
 
   if (p.search) {
     try {
       const r = await searchAndAnswer(questionPrompt(true), userMsg);
       text = r.text; urls = r.urls; usedSearch = true;
     } catch (e) {
-      if (/API Key/.test(e.message)) throw e;
-      searchFailed = true; // 联网搜索失败，降级为普通对话
+      // 联网搜索失败（例如没有开通该功能），降级为普通对话出题；Key 本身无效时下一步也会报错
+      searchError = e.message;
     }
   }
   if (!usedSearch) {
-    text = await chat([{ role: 'system', content: questionPrompt(false) }, { role: 'user', content: userMsg }], { json: true });
+    try {
+      text = await chat([{ role: 'system', content: questionPrompt(false) }, { role: 'user', content: userMsg }], { json: true });
+    } catch (e) {
+      throw new ApiError(searchError && searchError !== e.message
+        ? `联网搜索出错：${searchError}；普通出题也出错：${e.message}`
+        : e.message, e.status);
+    }
   }
 
   let parsed = extractJSON(text);
@@ -284,8 +310,8 @@ async function generateQuestions(form) {
   if (usedSearch) {
     notes.push(parsed.search_note || '');
     notes.push(urls.length ? `本次联网检索到 ${urls.length} 个网页。` : '本次没有获取到检索来源。');
-  } else if (searchFailed) {
-    notes.push('联网搜索暂时不可用，以下题目根据 JD 和简历推测。');
+  } else if (searchError) {
+    notes.push(`联网搜索不可用，以下题目根据 JD 和简历推测。（原因：${searchError}）`);
   } else {
     notes.push('当前模型不支持联网搜索，以下题目根据 JD 和简历推测。');
   }
