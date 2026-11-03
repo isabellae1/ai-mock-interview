@@ -97,7 +97,12 @@ function normUrl(u) {
 class ApiError extends Error {}
 
 function friendlyError(status, text) {
-  if (status === 401 || status === 403) return 'API Key 无效或没有权限，请在「设置」中检查。';
+  if (status === 401 || status === 403) {
+    const hint = settings.provider === 'qwen' && !customBase() && /^sk-ws-/.test(settings.apiKey)
+      ? '你的 Key 是 sk-ws- 开头的业务空间 Key，请在「设置」的「接口地址」中填写百炼控制台显示的专属地址（https://ws-…）。'
+      : '请在「设置」中检查 Key 是否正确、是否已被删除。';
+    return `API Key 无效或没有权限（HTTP ${status}）。${hint}`;
+  }
   if (status === 429) return '请求太频繁或额度不足，请稍后再试，或检查账户余额。';
   if (status === 404) return '模型名称或接口地址不对，请在「设置」中检查模型名称。';
   return `模型服务返回错误（${status}）：${String(text).slice(0, 200)}`;
@@ -131,11 +136,19 @@ function customBase() {
 async function callProvider(path, body) {
   const p = PROVIDERS[settings.provider];
   const custom = customBase();
+  let customFailed = false;
   if (custom && custom !== p.base) {
     try { return await postJSON(custom + path, body); }
-    catch (e) { if (!(e instanceof NetworkError)) throw e; }
+    catch (e) { if (!(e instanceof NetworkError)) throw e; customFailed = true; }
   }
-  return postJSON(p.base + path, body);
+  try {
+    return await postJSON(p.base + path, body);
+  } catch (e) {
+    if (customFailed) {
+      throw new ApiError(`「设置」里填写的接口地址无法从浏览器直接访问（可能被跨域限制）；自动改用默认地址后又出错：${e.message}`);
+    }
+    throw e;
+  }
 }
 
 async function chat(messages, { json = false, temperature = 0.7 } = {}) {
