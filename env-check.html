@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>环境检测 · AI 面试陪练</title>
+<style>
+  :root { --bg:#fafaf9; --fg:#1c1917; --muted:#78716c; --card:#fff; --line:#e7e5e4; --ok:#15803d; --bad:#b91c1c; --warn:#b45309; --accent:#2563eb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --card:#292524; --line:#44403c; --ok:#4ade80; --bad:#f87171; --warn:#fbbf24; --accent:#60a5fa; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  p.lead { color:var(--muted); margin:0 0 24px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  h2 { font-size:17px; margin:0 0 8px; }
+  button { font:inherit; padding:8px 16px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  table { width:100%; border-collapse:collapse; margin-top:12px; font-size:15px; }
+  td { padding:6px 4px; border-top:1px solid var(--line); vertical-align:top; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); } .muted { color:var(--muted); }
+  #transcript { min-height:60px; margin-top:12px; padding:8px; border:1px dashed var(--line); border-radius:8px; white-space:pre-wrap; }
+  #summary { white-space:pre-wrap; font-family:ui-monospace,Menlo,monospace; font-size:13px; background:var(--bg); padding:12px; border-radius:8px; margin-top:12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>环境检测</h1>
+  <p class="lead">检测这个浏览器和网络能否运行「AI 面试陪练」。不需要 API Key，不会发送任何个人信息。</p>
+
+  <section>
+    <h2>1. 语音识别</h2>
+    <p class="muted">点击开始后，允许使用麦克风，然后说一句中文，比如"我叫张三，正在准备面试"。</p>
+    <button id="micBtn">开始说话</button>
+    <div id="speechResult" style="margin-top:8px"></div>
+    <div id="transcript" class="muted">（转写结果会显示在这里）</div>
+  </section>
+
+  <section>
+    <h2>2. 浏览器能否直接调用模型 API</h2>
+    <p class="muted">用一个假的 Key 发请求。只要服务器有回应（哪怕是"Key 无效"），就说明浏览器可以直接调用。</p>
+    <button id="apiBtn">开始检测</button>
+    <table id="apiTable"></table>
+  </section>
+
+  <section>
+    <h2>3. 检测结果</h2>
+    <p class="muted">两项都完成后，把下面这段文字复制发给 Claude。</p>
+    <div id="summary">（尚未完成检测）</div>
+  </section>
+</main>
+
+<script>
+const results = { browser: navigator.userAgent, speech: '未测试', apis: {} };
+
+function updateSummary() {
+  const lines = ['浏览器：' + results.browser, '语音识别：' + results.speech];
+  for (const [name, r] of Object.entries(results.apis)) lines.push(name + '：' + r);
+  document.getElementById('summary').textContent = lines.join('\n');
+}
+
+// ---------- 1. 语音识别 ----------
+const micBtn = document.getElementById('micBtn');
+const speechResult = document.getElementById('speechResult');
+const transcriptEl = document.getElementById('transcript');
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+if (!SR) {
+  micBtn.disabled = true;
+  speechResult.innerHTML = '<span class="bad">✗ 这个浏览器不支持语音识别</span>';
+  results.speech = '不支持（浏览器没有语音识别接口）';
+  updateSummary();
+}
+
+micBtn.onclick = () => {
+  const rec = new SR();
+  rec.lang = 'zh-CN';
+  rec.interimResults = true;
+  rec.continuous = false;
+  let gotText = false;
+  micBtn.disabled = true;
+  speechResult.innerHTML = '<span class="warn">正在听…</span>';
+  transcriptEl.textContent = '';
+
+  rec.onresult = (e) => {
+    let text = '';
+    for (const r of e.results) text += r[0].transcript;
+    transcriptEl.textContent = text;
+    gotText = text.trim().length > 0;
+  };
+  rec.onerror = (e) => {
+    const reasons = {
+      'network': '网络错误：语音服务连不上（Chrome 在国内常见）',
+      'not-allowed': '没有麦克风权限',
+      'service-not-allowed': '语音服务不可用',
+      'no-speech': '没有听到声音',
+      'audio-capture': '没有找到麦克风',
+    };
+    const msg = reasons[e.error] || e.error;
+    speechResult.innerHTML = '<span class="bad">✗ ' + msg + '</span>';
+    results.speech = '失败（' + e.error + '）';
+    updateSummary();
+  };
+  rec.onend = () => {
+    micBtn.disabled = false;
+    if (gotText) {
+      speechResult.innerHTML = '<span class="ok">✓ 语音识别可用</span>';
+      results.speech = '可用（识别到：' + transcriptEl.textContent.slice(0, 20) + '）';
+      updateSummary();
+    } else if (results.speech === '未测试') {
+      speechResult.innerHTML = '<span class="warn">没有识别到文字，请再试一次</span>';
+    }
+  };
+  rec.start();
+};
+
+// ---------- 2. API 跨域 ----------
+const endpoints = [
+  ['通义千问（百炼）', 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', 'qwen-plus'],
+  ['Kimi（月之暗面）', 'https://api.moonshot.cn/v1/chat/completions', 'kimi-latest'],
+  ['智谱 GLM', 'https://open.bigmodel.cn/api/paas/v4/chat/completions', 'glm-4-flash'],
+  ['DeepSeek（对照）', 'https://api.deepseek.com/chat/completions', 'deepseek-chat'],
+];
+
+document.getElementById('apiBtn').onclick = async () => {
+  const btn = document.getElementById('apiBtn');
+  const table = document.getElementById('apiTable');
+  btn.disabled = true;
+  table.innerHTML = '';
+  for (const [name, url, model] of endpoints) {
+    const row = table.insertRow();
+    row.insertCell().textContent = name;
+    const cell = row.insertCell();
+    cell.innerHTML = '<span class="muted">检测中…</span>';
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 15000);
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-invalid-key' },
+        body: JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }] }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      cell.innerHTML = '<span class="ok">✓ 可以直接调用</span> <span class="muted">（服务器返回 ' + res.status + '）</span>';
+      results.apis[name] = '可以直接调用（HTTP ' + res.status + '）';
+    } catch (err) {
+      const timeout = err.name === 'AbortError';
+      cell.innerHTML = '<span class="bad">✗ ' + (timeout ? '超时' : '被浏览器拦截或网络不通') + '</span>';
+      results.apis[name] = timeout ? '超时' : '不能直接调用（' + err.message + '）';
+    }
+    updateSummary();
+  }
+  btn.disabled = false;
+};
+
+updateSummary();
+</script>
+</body>
+</html>
