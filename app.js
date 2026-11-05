@@ -10,7 +10,7 @@ const PROVIDERS = {
   qwen: {
     name: '通义千问（推荐，支持联网搜索）',
     base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen-plus',
+    model: 'qwen3.7-plus',
     search: true,
   },
   kimi: {
@@ -69,6 +69,7 @@ const store = {
 const DEFAULT_SETTINGS = {
   provider: 'qwen', apiKey: '', baseUrl: '', model: PROVIDERS.qwen.model,
   qCount: 6, answerSec: 180, followups: 1, autoMic: true,
+  webSearch: true, tts: true, voiceURI: '', ttsRate: 1,
 };
 let settings = { ...DEFAULT_SETTINGS, ...store.get('settings', {}) };
 
@@ -87,6 +88,10 @@ function setStatus(el, text, isError = false) {
 function fmtTime(sec) {
   const m = Math.floor(sec / 60), s = sec % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+// 去掉模型检索时留下的 [10][16] 这类内部引用编号
+function stripRefs(s) {
+  return String(s ?? '').replace(/\s*(\[\d+(?:[,，、\s]*\d+)*\])+/g, '').trim();
 }
 function normUrl(u) {
   try { const x = new URL(u); return (x.host + x.pathname).replace(/\/+$/, '').toLowerCase(); }
@@ -224,7 +229,8 @@ ${withSearch ? `请先使用联网搜索，查找：
 出题要求：
 - 共 ${settings.qCount} 道题，第 1 题是自我介绍
 - 其余题目覆盖：行为题（STAR 类）、岗位能力题、业务理解题；如果提供了简历，至少 1 道针对简历中具体经历的题
-- 题目用面试官的口吻，一句话说清楚，像真实的 AI 面试题
+- 题目用面试官的口吻，像真实的 AI 面试题：简洁口语化，每题不超过 60 个字，不要在题目里提示答题结构
+- 题目会被语音朗读出来，不要使用括号注释、编号列表或特殊符号
 
 来源标注规则（非常重要，必须遵守）：
 - source_type 只能是：interview_report（来自检索到的面经）、company_info（来自检索到的公司信息）、jd（根据 JD 推测）、resume（根据简历）
@@ -265,7 +271,7 @@ function enforceSources(questions, urls) {
       } else {
         url = '';
       }
-      return { question: String(q.question).trim(), category: q.category || '', source_type: type, source_url: url, reason: q.reason || '' };
+      return { question: stripRefs(q.question), category: q.category || '', source_type: type, source_url: url, reason: stripRefs(q.reason || '') };
     });
   return { questions: cleaned, downgraded };
 }
@@ -275,7 +281,7 @@ async function generateQuestions(form) {
   const userMsg = questionUserMessage(form);
   let text = '', urls = [], usedSearch = false, searchError = '';
 
-  if (p.search) {
+  if (p.search && settings.webSearch) {
     try {
       const r = await searchAndAnswer(questionPrompt(true), userMsg);
       text = r.text; urls = r.urls; usedSearch = true;
@@ -308,10 +314,12 @@ async function generateQuestions(form) {
   const { questions, downgraded } = enforceSources(parsed.questions, urls);
   const notes = [];
   if (usedSearch) {
-    notes.push(parsed.search_note || '');
+    notes.push(stripRefs(parsed.search_note || ''));
     notes.push(urls.length ? `本次联网检索到 ${urls.length} 个网页。` : '本次没有获取到检索来源。');
   } else if (searchError) {
     notes.push(`联网搜索不可用，以下题目根据 JD 和简历推测。（原因：${searchError}）`);
+  } else if (p.search && !settings.webSearch) {
+    notes.push('已在「设置」中关闭联网搜索，以下题目根据 JD 和简历推测。');
   } else {
     notes.push('当前模型不支持联网搜索，以下题目根据 JD 和简历推测。');
   }
@@ -428,6 +436,70 @@ function stopMic() {
   setStatus($('micStatus'), '');
 }
 
+// ---------------- 语音播报题目（浏览器自带，不调用任何服务） ----------------
+const TTS = window.speechSynthesis || null;
+
+function chineseVoices() {
+  if (!TTS) return [];
+  return TTS.getVoices().filter((v) => /^zh/i.test(v.lang));
+}
+
+function pickVoice() {
+  const voices = chineseVoices();
+  return voices.find((v) => v.voiceURI === settings.voiceURI)
+    || voices.find((v) => /zh[-_]CN/i.test(v.lang) && v.localService)
+    || voices.find((v) => /zh[-_]CN/i.test(v.lang))
+    || voices[0] || null;
+}
+
+function fillVoices() {
+  const sel = $('voice');
+  if (!TTS) { sel.innerHTML = '<option value="">当前浏览器不支持语音播报</option>'; sel.disabled = true; return; }
+  const voices = chineseVoices();
+  if (!voices.length) { sel.innerHTML = '<option value="">（系统默认声音）</option>'; return; }
+  const current = pickVoice();
+  sel.innerHTML = voices.map((v) => `<option value="${esc(v.voiceURI)}">${esc(v.name)}${v.localService ? '' : '（在线）'}</option>`).join('');
+  if (current) sel.value = current.voiceURI;
+}
+
+let speakResolve = null;
+function speak(text) {
+  return new Promise((resolve) => {
+    if (!TTS || !text) { resolve(); return; }
+    TTS.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'zh-CN';
+    u.rate = Number(settings.ttsRate) || 1;
+    const v = pickVoice();
+    if (v) u.voice = v;
+    let done = false;
+    const finish = () => { if (done) return; done = true; clearTimeout(guard); speakResolve = null; resolve(); };
+    // 部分浏览器偶尔不触发结束事件，按字数估算一个最长等待时间兜底
+    const guard = setTimeout(finish, Math.max(4000, text.length * 350 / u.rate + 2000));
+    u.onend = finish;
+    u.onerror = finish;
+    speakResolve = finish;
+    TTS.speak(u);
+  });
+}
+
+function stopSpeaking() {
+  if (TTS) TTS.cancel();
+  if (speakResolve) speakResolve();
+}
+
+// 重听题目：作答中重听时先暂停语音输入，避免把播报声音识别成回答
+async function replayQuestion() {
+  const text = $('qText').textContent;
+  if (!text) return;
+  const micWasOn = mic.on;
+  if (micWasOn) stopMic();
+  const prevPhase = phase;
+  if (prevPhase === 'speaking') return;
+  await speak(text);
+  if (micWasOn && phase === 'answer') startMic();
+}
+
 // ---------------- 面试流程 ----------------
 let session = null;
 let timer = null;
@@ -460,7 +532,10 @@ function startQuestion() {
   runTurn();
 }
 
-function runTurn() {
+// 阶段：speaking（播报题目）→ prep（准备）→ answer（作答）→ waiting（等待 AI）
+let phase = 'idle';
+
+async function runTurn() {
   const result = currentResult();
   const turnIdx = result.turns.length - 1;
   const turn = result.turns[turnIdx];
@@ -472,11 +547,23 @@ function runTurn() {
   $('answer').value = '';
   setStatus($('interviewStatus'), '');
   setStatus($('micStatus'), '');
+  $('answerArea').classList.add('hidden');
+  $('prepActions').classList.remove('hidden');
   show('interviewView');
+
+  // 像真实 AI 面试一样，先用语音读出题目，读完再开始准备计时
+  if (settings.tts && TTS) {
+    phase = 'speaking';
+    $('timer').textContent = '🔊 面试官正在提问…';
+    $('timer').className = 'timer prep';
+    await speak(turn.q);
+    if (phase !== 'speaking') return; // 用户已跳过
+  }
   startPrep();
 }
 
 function startPrep() {
+  phase = 'prep';
   clearInterval(timer);
   $('answerArea').classList.add('hidden');
   $('prepActions').classList.remove('hidden');
@@ -492,6 +579,9 @@ function startPrep() {
 }
 
 function startAnswer() {
+  if (phase === 'answer') return;
+  phase = 'answer';
+  stopSpeaking();
   clearInterval(timer);
   $('prepActions').classList.add('hidden');
   $('answerArea').classList.remove('hidden');
@@ -513,8 +603,10 @@ function startAnswer() {
 }
 
 async function submitAnswer(timeUp = false) {
+  phase = 'waiting';
   clearInterval(timer);
   stopMic();
+  stopSpeaking();
   $('submitAnswer').disabled = true;
   const result = currentResult();
   const turn = result.turns.at(-1);
@@ -529,14 +621,17 @@ async function submitAnswer(timeUp = false) {
     if (followupsDone < Number(settings.followups)) {
       setStatus($('interviewStatus'), '面试官正在思考追问…');
       const fq = await generateFollowup(result);
+      if (session.ended) return;
       result.turns.push({ q: fq, answer: '', seconds: 0 });
       runTurn();
     } else {
       setStatus($('interviewStatus'), '正在评分…');
       result.score = await scoreAnswer(result);
+      if (session.ended) return;
       renderFeedback(result);
     }
   } catch (e) {
+    if (session.ended) return;
     setStatus($('interviewStatus'), e.message + '（可以点「提交回答」重试）', true);
     $('submitAnswer').disabled = false;
   }
@@ -572,6 +667,21 @@ function renderFeedback(result) {
   $('feedbackContent').innerHTML = feedbackHTML(result);
   $('nextQuestion').textContent = session.idx < session.questions.length - 1 ? '下一题' : '查看总结';
   show('feedbackView');
+}
+
+// 提前结束本轮：只保留已经评分的题目，直接生成总结
+function endRound() {
+  if (!session) return;
+  const done = session.results.filter((r) => r?.score?.scores).length;
+  const msg = done ? `结束本轮？将根据已完成评分的 ${done} 道题生成总结。` : '结束本轮？目前还没有完成评分的题目。';
+  if (!confirm(msg)) return;
+  session.ended = true;
+  phase = 'idle';
+  clearInterval(timer);
+  stopMic();
+  stopSpeaking();
+  session.results = session.results.filter((r) => r?.score);
+  renderReport();
 }
 
 function nextQuestion() {
@@ -659,6 +769,11 @@ function fillSettings() {
   $('followups').value = String(settings.followups);
   $('autoMic').checked = !!settings.autoMic;
   if (!SR) { $('autoMic').checked = false; $('autoMic').disabled = true; }
+  $('webSearch').checked = settings.webSearch !== false;
+  $('tts').checked = !!settings.tts && !!TTS;
+  if (!TTS) $('tts').disabled = true;
+  $('ttsRate').value = String(settings.ttsRate || 1);
+  fillVoices();
 }
 
 function saveSettings() {
@@ -671,6 +786,10 @@ function saveSettings() {
     answerSec: Number($('answerSec').value),
     followups: Number($('followups').value),
     autoMic: $('autoMic').checked,
+    webSearch: $('webSearch').checked,
+    tts: $('tts').checked,
+    voiceURI: $('voice').value,
+    ttsRate: Number($('ttsRate').value) || 1,
   };
   store.set('settings', settings);
   $('settingsPanel').classList.add('hidden');
@@ -740,11 +859,14 @@ function maskPII(text) {
   let count = 0;
   const rules = [
     [/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, '【邮箱已隐藏】'],
+    [/(出生日期|出生年月|出生|生日)[ \t]*[:：]?[ \t]*\d{4}[ \t]*[.\-/年][ \t]*\d{1,2}([ \t]*[.\-/月][ \t]*\d{1,2}[ \t]*日?)?/g, '$1：【已隐藏】'],
     [/(?<![\dA-Za-z])\d{17}[\dXx](?![\dA-Za-z])/g, '【身份证号已隐藏】'],
     [/(?<!\d)(\+?86[\s-]?)?1[3-9]\d[\s-]?\d{4}[\s-]?\d{4}(?!\d)/g, '【手机号已隐藏】'],
     [/(?<!\d)(\+?61[\s-]?|0)4\d{2}[\s-]?\d{3}[\s-]?\d{3}(?!\d)/g, '【手机号已隐藏】'],
   ];
-  for (const [re, rep] of rules) text = text.replace(re, () => { count++; return rep; });
+  for (const [re, rep] of rules) {
+    text = text.replace(re, (...args) => { count++; return rep.replace(/\$(\d)/g, (_, n) => args[Number(n)] ?? ''); });
+  }
   return { text, count };
 }
 
@@ -862,11 +984,15 @@ function init() {
   $('backToSetup').onclick = () => show('setupView');
   $('startBtn').onclick = () => {
     if (!settings.apiKey) { $('settingsPanel').classList.remove('hidden'); return; }
-    session.idx = 0; session.results = []; session.startedAt = new Date();
+    session.idx = 0; session.results = []; session.startedAt = new Date(); session.ended = false;
     startQuestion();
   };
 
   $('skipPrep').onclick = startAnswer;
+  $('replayBtn').onclick = replayQuestion;
+  $('endRoundBtn').onclick = endRound;
+  $('endRoundBtn2').onclick = endRound;
+  if (TTS) TTS.onvoiceschanged = fillVoices;
   // 语音识别中开始打字：自动暂停语音，避免识别结果覆盖手动输入
   $('answer').addEventListener('beforeinput', () => { if (mic.on) stopMic(); });
   $('micBtn').onclick = () => (mic.on ? stopMic() : startMic());

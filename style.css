@@ -87,3 +87,7 @@ button:disabled { opacity: .5; cursor: default; }
 }
 .filebtn input { display: none; }
 .small { font-size: 13px; }
+
+.qhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+button.tiny { font-size: 13px; padding: 2px 10px; }
+.endbar { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); text-align: right; }

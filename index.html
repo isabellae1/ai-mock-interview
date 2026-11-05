@@ -47,6 +47,14 @@
         <select id="followups"><option value="0">不追问</option><option value="1" selected>1 次</option><option value="2">2 次</option></select>
       </label>
     </div>
+    <label class="check"><input id="webSearch" type="checkbox" checked> 出题时联网搜索面经和公司信息（仅通义千问支持；搜索会按次额外计费，不在免费额度内）</label>
+    <label class="check"><input id="tts" type="checkbox" checked> 用语音读出题目（像真实 AI 面试一样）</label>
+    <div class="row">
+      <label>播报声音 <select id="voice"></select></label>
+      <label>语速
+        <select id="ttsRate"><option value="0.9">稍慢</option><option value="1" selected>正常</option><option value="1.15">稍快</option></select>
+      </label>
+    </div>
     <label class="check"><input id="autoMic" type="checkbox" checked> 作答时自动开启语音输入</label>
     <div class="actions">
       <button id="saveSettings">保存</button>
@@ -100,7 +108,10 @@
   <section id="interviewView" class="card hidden">
     <div class="progress" id="progress"></div>
     <div class="qbox">
-      <div class="qlabel" id="qLabel"></div>
+      <div class="qhead">
+        <div class="qlabel" id="qLabel"></div>
+        <button class="ghost tiny" id="replayBtn" title="再听一遍题目">🔊 重听</button>
+      </div>
       <div class="qtext" id="qText"></div>
     </div>
     <div class="timer" id="timer"></div>
@@ -116,6 +127,7 @@
       <button class="ghost" id="skipPrep">跳过准备，直接作答</button>
     </div>
     <div id="interviewStatus" class="status"></div>
+    <div class="endbar"><button class="ghost danger tiny" id="endRoundBtn">结束本轮，查看总结</button></div>
   </section>
 
   <!-- 单题反馈 -->
@@ -124,6 +136,7 @@
     <div id="feedbackContent"></div>
     <div class="actions">
       <button id="nextQuestion">下一题</button>
+      <button class="ghost danger" id="endRoundBtn2">结束本轮，查看总结</button>
     </div>
   </section>
 
