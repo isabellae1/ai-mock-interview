@@ -25,25 +25,10 @@
   --radius: 10px;
   --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --desk: #151D28;
-    --paper: #1D2735;
-    --ink: #E6ECF3;
-    --muted: #93A0B2;
-    --line: #2E3A4B;
-    --cobalt: #6C88FF;
-    --cobalt-ink: #0F1730;
-    --cobalt-soft: #263255;
-    --bad: #FF7B80;
-    --ok: #4CC890;
-    --stage: #0C131D;
-    --stage-2: #172232;
-  }
-}
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
+html { color-scheme: light; }
 body {
   margin: 0; background: var(--desk); color: var(--ink);
   font: 16px/1.65 var(--font);
@@ -56,8 +41,8 @@ a { color: var(--cobalt); }
 
 /* ---------- 顶部 ---------- */
 .topbar {
-  display: flex; justify-content: space-between; align-items: center;
-  max-width: 760px; margin: 0 auto; padding: 20px 16px 8px;
+  display: flex; justify-content: space-between; align-items: center; gap: 32px;
+  max-width: 1120px; margin: 0 auto; padding: 22px 24px 6px;
 }
 .brand { display: flex; align-items: center; gap: 10px; }
 .logo {
@@ -69,7 +54,7 @@ a { color: var(--cobalt); }
 .tag { font-size: 12px; color: var(--muted); }
 
 /* ---------- 步骤条：确实是一个先后顺序，所以用编号 ---------- */
-.steps { max-width: 760px; margin: 0 auto; padding: 4px 16px 0; }
+.steps { flex: 1; max-width: 560px; }
 .steps ol {
   list-style: none; margin: 0; padding: 0; counter-reset: s;
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
@@ -83,8 +68,25 @@ a { color: var(--cobalt); }
 .steps li.active { border-top-color: var(--cobalt); color: var(--ink); font-weight: 600; }
 
 /* ---------- 页面 ---------- */
-main { max-width: 760px; margin: 0 auto; padding: 8px 16px 24px; }
-.view { padding-top: 22px; }
+main { max-width: 1120px; margin: 0 auto; padding: 8px 24px 24px; }
+.view { padding-top: 30px; }
+
+/* 大屏两栏：左侧说明 / 操作，右侧主要内容 */
+.cols { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 40px; align-items: start; }
+.cols > .side { position: sticky; top: 24px; }
+.howto { list-style: none; padding: 0; margin: 8px 0 0; counter-reset: h; }
+.howto li {
+  counter-increment: h; position: relative; padding: 0 0 16px 40px; font-size: 14px; color: var(--muted);
+}
+.howto li::before {
+  content: counter(h); position: absolute; left: 0; top: 0;
+  width: 26px; height: 26px; border-radius: 50%; border: 1.5px solid var(--line);
+  display: grid; place-items: center; font-size: 13px; font-weight: 700; color: var(--ink); background: var(--paper);
+}
+.howto li:not(:last-child)::after {
+  content: ""; position: absolute; left: 13px; top: 30px; bottom: 4px; width: 1.5px; background: var(--line);
+}
+.howto b { display: block; color: var(--ink); font-size: 15px; }
 h1 { font-size: 26px; line-height: 1.3; margin: 0 0 6px; font-weight: 700; letter-spacing: .3px; }
 h2 { font-size: 18px; margin: 0 0 8px; }
 .lead { color: var(--muted); margin: 0 0 18px; max-width: 36em; }
@@ -179,11 +181,6 @@ button:disabled { opacity: .45; cursor: default; }
 .src-company_info { background: #E3F4EC; color: #1B6E49; }
 .src-jd { background: var(--cobalt-soft); color: var(--cobalt); }
 .src-resume { background: #F2E6FA; color: #7A3EA0; }
-@media (prefers-color-scheme: dark) {
-  .src-interview_report { background: #3D3018; color: #F3C46B; }
-  .src-company_info { background: #17362A; color: #67D3A0; }
-  .src-resume { background: #33243F; color: #CDA3EC; }
-}
 
 .addrow { display: flex; gap: 10px; align-items: center; }
 .addrow button { flex: none; }
@@ -308,3 +305,50 @@ legend { font-size: 13px; font-weight: 700; color: var(--ink); padding: 0 8px 0 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- 面试页：左舞台，右作答 ---------- */
+.studio { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 28px; align-items: stretch; }
+.studio .stage { min-height: 420px; display: flex; flex-direction: column; }
+.studio .qbox { flex: 1; }
+.answer-col { display: flex; flex-direction: column; }
+.answer-col #answerArea { margin-top: 0; }
+.answer-col #answerArea textarea { min-height: 300px; }
+.waiting-hint {
+  display: none; border: 1.5px dashed var(--line); border-radius: var(--radius-lg);
+  padding: 22px; min-height: 300px;
+}
+.waiting-hint p { margin: 0 0 6px; }
+#answerArea.hidden ~ .waiting-hint { display: block; }
+.answer-col .endbar { margin-top: auto; padding-top: 18px; }
+
+/* ---------- 反馈 / 总结：左详情，右评分 ---------- */
+#feedbackContent.cols, #reportContent.cols { grid-template-columns: minmax(0, 1fr) minmax(300px, 400px); margin-top: 14px; }
+#reportContent.cols { grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); }
+.fb-side, .rp-side {
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 18px 20px;
+}
+.fb-side .scores, .rp-side .scores { margin: 0; }
+.fb-side h2, .rp-side h2 { margin-bottom: 4px; }
+.fb-main h2 { margin-top: 20px; }
+.rp-main .scores { margin-top: 0; }
+
+@media (max-width: 900px) {
+  .topbar { flex-wrap: wrap; gap: 14px; padding: 18px 16px 6px; }
+  .steps { order: 3; flex-basis: 100%; max-width: none; }
+  main { padding: 8px 16px 24px; }
+  .cols, #feedbackContent.cols, #reportContent.cols, .studio { grid-template-columns: 1fr; gap: 20px; }
+  .cols > .side { position: static; }
+  .howto { display: none; }
+  .studio .stage { min-height: 0; }
+  .answer-col #answerArea textarea, .waiting-hint { min-height: 0; }
+  .waiting-hint { display: none !important; }
+}
+
+.dimrow { padding: 12px 0; border-top: 1px solid var(--line); }
+.dimrow:first-of-type { border-top: 0; padding-top: 6px; }
+.dimhead { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.dimhead .dim { font-weight: 600; }
+.dimwhy { margin: 6px 0 0; font-size: 14px; color: var(--muted); }
+.fb-side .highlight { margin: 12px 0 0; font-size: 14px; }
+.rp-side .summary-head { margin-top: 0; }
+.rp-side .bar { min-width: 80px; }

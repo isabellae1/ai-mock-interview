@@ -670,17 +670,26 @@ function feedbackHTML(result) {
     </div>`).join('');
   const s = result.score;
   if (!s || s.error) {
-    return turns + `<p class="status error">评分结果解析失败，原始内容如下：</p><div class="ref">${esc(s?.raw || '')}</div>`;
+    return `<div class="fb-main">${turns}<p class="status error">评分结果解析失败，原始内容如下：</p><div class="ref">${esc(s?.raw || '')}</div></div>`;
   }
-  const rows = DIMENSIONS.map(([k, name]) => `
-    <tr><td class="dim">${name}</td><td class="stars">${stars(s.scores[k]?.score)}</td><td>${esc(s.scores[k]?.reason)}</td></tr>`).join('');
+  const dims = DIMENSIONS.map(([k, name]) => `
+    <div class="dimrow">
+      <div class="dimhead"><span class="dim">${name}</span><span class="stars">${stars(s.scores[k]?.score)}</span></div>
+      <p class="dimwhy">${esc(s.scores[k]?.reason)}</p>
+    </div>`).join('');
   const imps = (s.improvements || []).map((x) => `<li>${esc(x)}</li>`).join('');
-  return `${turns}
-    <table class="scores"><tr><th>维度</th><th>得分</th><th>理由</th></tr>${rows}</table>
-    ${s.highlight ? `<p class="highlight">${esc(s.highlight)}</p>` : ''}
-    ${imps ? `<h2>改进建议</h2><ul>${imps}</ul>` : ''}
-    <h2>参考回答</h2>
-    <div class="ref">${esc(s.reference_answer)}</div>`;
+  return `
+    <div class="fb-main">
+      ${turns}
+      ${imps ? `<h2>改进建议</h2><ul>${imps}</ul>` : ''}
+      <h2>参考回答</h2>
+      <div class="ref">${esc(s.reference_answer)}</div>
+    </div>
+    <aside class="fb-side">
+      <h2>评分</h2>
+      ${dims}
+      ${s.highlight ? `<p class="highlight">${esc(s.highlight)}</p>` : ''}
+    </aside>`;
 }
 
 function renderFeedback(result) {
@@ -728,7 +737,7 @@ function renderReport() {
   const { avg, count } = averages();
   const total = DIMENSIONS.reduce((s, [k]) => s + avg[k], 0) / DIMENSIONS.length;
   const weakest = DIMENSIONS.reduce((w, d) => (avg[d[0]] < avg[w[0]] ? d : w));
-  const dimRows = DIMENSIONS.map(([k, name]) => `<tr><td class="dim">${name}</td><td style="width:60%"><div class="bar"><i style="width:${(avg[k] / 5) * 100}%"></i></div></td><td>${avg[k].toFixed(1)}</td></tr>`).join('');
+  const dimRows = DIMENSIONS.map(([k, name]) => `<tr><td class="dim">${name}</td><td style="width:55%"><div class="bar"><i style="width:${(avg[k] / 5) * 100}%"></i></div></td><td>${avg[k].toFixed(1)}</td></tr>`).join('');
   const qRows = session.results.map((r, i) => {
     const sc = r?.score?.scores;
     const qa = sc ? (DIMENSIONS.reduce((s, [k]) => s + (Number(sc[k]?.score) || 0), 0) / DIMENSIONS.length).toFixed(1) : '—';
@@ -736,11 +745,15 @@ function renderReport() {
     return `<tr><td>${i + 1}. ${esc(r.question.question)}</td><td>${qa}</td><td>${fmtTime(secs)}</td></tr>`;
   }).join('');
   $('reportContent').innerHTML = count ? `
-    <div class="summary-head"><span class="big">${total.toFixed(1)}</span><span class="muted">平均分（满分 5），共 ${session.results.length} 道题</span></div>
-    <p>最需要加强的是「${weakest[1]}」。</p>
-    <table class="scores bars"><tr><th>维度</th><th></th><th>平均分</th></tr>${dimRows}</table>
-    <table class="scores"><tr><th>题目</th><th>得分</th><th>用时</th></tr>${qRows}</table>
-    <p class="muted">每道题的详细反馈和参考回答，可以导出为 Markdown 保存。</p>`
+    <aside class="rp-side">
+      <div class="summary-head"><span class="big">${total.toFixed(1)}</span><span class="muted">平均分（满分 5）<br>共 ${session.results.length} 道题</span></div>
+      <p>最需要加强的是「${weakest[1]}」。</p>
+      <table class="scores bars"><tr><th>维度</th><th></th><th>均分</th></tr>${dimRows}</table>
+    </aside>
+    <div class="rp-main">
+      <table class="scores"><tr><th>题目</th><th>得分</th><th>用时</th></tr>${qRows}</table>
+      <p class="muted small">每道题的详细反馈和参考回答，可以导出为 Markdown 保存。</p>
+    </div>`
     : '<p>本轮没有完成评分的题目。</p>';
   show('reportView');
 }
