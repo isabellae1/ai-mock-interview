@@ -28,12 +28,12 @@ const PROVIDERS = {
 };
 
 const SOURCE_LABELS = {
-  interview_report: '🔍 面经',
-  company_info: '🏢 公司信息',
-  jd: '📄 JD 推测',
-  resume: '👤 简历',
-  bank: '📚 通用题库',
-  custom: '✏️ 自己添加',
+  interview_report: '来自面经',
+  company_info: '公司动态',
+  jd: '根据 JD',
+  resume: '根据简历',
+  bank: '通用题库',
+  custom: '自己添加',
 };
 
 const DIMENSIONS = [
@@ -77,8 +77,16 @@ let settings = { ...DEFAULT_SETTINGS, ...store.get('settings', {}) };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const views = ['setupView', 'reviewView', 'interviewView', 'feedbackView', 'reportView'];
+const VIEW_STEP = { setupView: 1, reviewView: 2, interviewView: 3, feedbackView: 3, reportView: 4 };
 function show(viewId) {
   views.forEach((v) => $(v).classList.toggle('hidden', v !== viewId));
+  const step = VIEW_STEP[viewId] || 1;
+  document.querySelectorAll('.steps li').forEach((li) => {
+    const n = Number(li.dataset.step);
+    li.classList.toggle('active', n === step);
+    li.classList.toggle('done', n < step);
+    if (n === step) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current');
+  });
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 function setStatus(el, text, isError = false) {
@@ -323,7 +331,7 @@ async function generateQuestions(form) {
   } else {
     notes.push('当前模型不支持联网搜索，以下题目根据 JD 和简历推测。');
   }
-  if (downgraded) notes.push(`有 ${downgraded} 道题声称来自网页但找不到对应来源，已改标为「JD 推测」。`);
+  if (downgraded) notes.push(`有 ${downgraded} 道题声称来自网页但找不到对应来源，已改标为「根据 JD」。`);
   if (!questions.some((q) => q.source_type === 'interview_report')) notes.push('未检索到该岗位可核实的公开面经。');
   return { questions, note: notes.filter(Boolean).join(' ') };
 }
@@ -400,8 +408,9 @@ function startMic() {
   if (mic.on) return;
   mic.on = true;
   mic.base = $('answer').value;
-  $('micBtn').textContent = '⏸ 暂停语音';
-  setStatus($('micStatus'), '🎙 正在听…（开始打字会自动暂停语音）');
+  $('micBtn').textContent = '暂停语音';
+  setStatus($('micStatus'), '正在听…（开始打字会自动暂停语音）');
+  $('micStatus').classList.add('listening');
 
   const rec = new SR();
   rec.lang = 'zh-CN';
@@ -433,7 +442,8 @@ function stopMic() {
   mic.on = false;
   if (mic.rec) { try { mic.rec.stop(); } catch {} }
   mic.rec = null;
-  $('micBtn').textContent = '🎙 开启语音';
+  $('micBtn').textContent = '开启语音';
+  $('micStatus').classList.remove('listening');
   setStatus($('micStatus'), '');
 }
 
@@ -514,12 +524,12 @@ function renderQuestionList() {
   $('searchNote').classList.toggle('hidden', !session.note);
   $('questionList').innerHTML = session.questions.map((q, i) => `
     <li>
-      <div>${esc(q.question)} <button class="ghost del" data-i="${i}" title="删除这道题">删除</button></div>
+      <div class="qtitle"><span>${esc(q.question)}</span><button class="link del" data-i="${i}" title="删除这道题">删除</button></div>
       <div class="qmeta">
-        <span class="badge">${SOURCE_LABELS[q.source_type] || ''}</span>
+        <span class="badge src-${esc(q.source_type)}">${SOURCE_LABELS[q.source_type] || ''}</span>
         ${q.category ? `<span class="badge">${esc(q.category)}</span>` : ''}
         ${q.source_url ? `<a href="${esc(q.source_url)}" target="_blank" rel="noopener">${esc(q.source_url)}</a>` : ''}
-        ${q.reason ? `<div>${esc(q.reason)}</div>` : ''}
+        ${q.reason ? `<div class="reason">${esc(q.reason)}</div>` : ''}
       </div>
     </li>`).join('');
   $('startBtn').disabled = session.questions.length === 0;
@@ -535,6 +545,17 @@ function startQuestion() {
 
 // 阶段：speaking（播报题目）→ prep（准备）→ answer（作答）→ waiting（等待 AI）
 let phase = 'idle';
+function setPhase(p) { phase = p; $('interviewView').dataset.phase = p; }
+
+// 舞台上的计时器：圆环表示剩余比例
+function renderClock(left, total, label) {
+  $('timer').innerHTML = `<span class="ring" style="--p:${total ? Math.max(0, left / total) : 0}"></span>
+    <span><span class="tnum">${fmtTime(left)}</span><span class="tlabel">${label}</span></span>`;
+}
+function renderMessage(text, wave = false) {
+  $('timer').innerHTML = (wave ? '<span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>' : '')
+    + `<span class="tmsg">${esc(text)}</span>`;
+}
 
 async function runTurn() {
   const result = currentResult();
@@ -542,7 +563,7 @@ async function runTurn() {
   const turn = result.turns[turnIdx];
   $('progress').textContent = `第 ${session.idx + 1} / ${session.questions.length} 题`;
   $('qLabel').textContent = turnIdx === 0
-    ? (SOURCE_LABELS[result.question.source_type] || '') + (result.question.category ? ` · ${result.question.category}` : '')
+    ? (SOURCE_LABELS[result.question.source_type] || '') + (result.question.category ? `，${result.question.category}` : '')
     : `追问 ${turnIdx}`;
   $('qText').textContent = turn.q;
   $('answer').value = '';
@@ -554,9 +575,8 @@ async function runTurn() {
 
   // 像真实 AI 面试一样，先用语音读出题目，读完再开始准备计时
   if (settings.tts && TTS) {
-    phase = 'speaking';
-    $('timer').textContent = '🔊 面试官正在提问…';
-    $('timer').className = 'timer prep';
+    setPhase('speaking');
+    renderMessage('面试官正在提问…', true);
     await speak(turn.q);
     if (phase !== 'speaking') return; // 用户已跳过
   }
@@ -564,14 +584,13 @@ async function runTurn() {
 }
 
 function startPrep() {
-  phase = 'prep';
+  setPhase('prep');
   clearInterval(timer);
   $('answerArea').classList.add('hidden');
   $('prepActions').classList.remove('hidden');
   let left = PREP_SECONDS;
   const tick = () => {
-    $('timer').textContent = `准备时间 ${fmtTime(left)}`;
-    $('timer').className = 'timer prep';
+    renderClock(left, PREP_SECONDS, '准备时间');
     if (left <= 0) { startAnswer(); return; }
     left--;
   };
@@ -581,7 +600,7 @@ function startPrep() {
 
 function startAnswer() {
   if (phase === 'answer') return;
-  phase = 'answer';
+  setPhase('answer');
   stopSpeaking();
   clearInterval(timer);
   $('prepActions').classList.add('hidden');
@@ -591,8 +610,7 @@ function startAnswer() {
   const started = Date.now();
   let left = total;
   const tick = () => {
-    $('timer').textContent = `作答剩余 ${fmtTime(left)}`;
-    $('timer').className = 'timer' + (left <= 15 ? ' low' : '');
+    renderClock(left, total, left <= 15 ? '即将自动提交' : '作答中');
     if (left <= 0) { submitAnswer(true); return; }
     left--;
   };
@@ -604,7 +622,7 @@ function startAnswer() {
 }
 
 async function submitAnswer(timeUp = false) {
-  phase = 'waiting';
+  setPhase('waiting');
   clearInterval(timer);
   stopMic();
   stopSpeaking();
@@ -614,8 +632,7 @@ async function submitAnswer(timeUp = false) {
   turn.answer = $('answer').value.trim();
   turn.seconds = Math.round((Date.now() - (turn.startedAt || Date.now())) / 1000);
   turn.chars = turn.answer.length;
-  $('timer').textContent = timeUp ? '时间到' : '已提交';
-  $('timer').className = 'timer';
+  renderMessage(timeUp ? '时间到，已自动提交' : '已提交');
 
   const followupsDone = result.turns.length - 1;
   try {
@@ -640,27 +657,29 @@ async function submitAnswer(timeUp = false) {
 
 function stars(n) {
   const v = Math.max(0, Math.min(5, Math.round(Number(n) || 0)));
-  return '★'.repeat(v) + '☆'.repeat(5 - v);
+  const cells = Array.from({ length: 5 }, (_, i) => `<i${i < v ? ' class="on"' : ''}></i>`).join('');
+  return `<span class="meter" aria-label="${v} 分（满分 5 分）">${cells}</span><span class="meter-n">${v}</span>`;
 }
 
 function feedbackHTML(result) {
   const turns = result.turns.map((t, i) => `
     <div class="turn">
-      <div><strong>${i === 0 ? '题目' : `追问 ${i}`}：</strong>${esc(t.q)}</div>
-      <div class="muted">你的回答（${t.seconds} 秒，${t.chars || 0} 字）：${esc(t.answer) || '（未作答）'}</div>
+      <div class="tq">${i === 0 ? '' : `追问 ${i}：`}${esc(t.q)}</div>
+      <div class="ta">${esc(t.answer) || '（未作答）'}</div>
+      <div class="tmeta">用时 ${t.seconds} 秒，${t.chars || 0} 字</div>
     </div>`).join('');
   const s = result.score;
   if (!s || s.error) {
     return turns + `<p class="status error">评分结果解析失败，原始内容如下：</p><div class="ref">${esc(s?.raw || '')}</div>`;
   }
   const rows = DIMENSIONS.map(([k, name]) => `
-    <tr><td>${name}</td><td class="stars">${stars(s.scores[k]?.score)}</td><td>${esc(s.scores[k]?.reason)}</td></tr>`).join('');
+    <tr><td class="dim">${name}</td><td class="stars">${stars(s.scores[k]?.score)}</td><td>${esc(s.scores[k]?.reason)}</td></tr>`).join('');
   const imps = (s.improvements || []).map((x) => `<li>${esc(x)}</li>`).join('');
   return `${turns}
     <table class="scores"><tr><th>维度</th><th>得分</th><th>理由</th></tr>${rows}</table>
-    ${s.highlight ? `<p>👍 ${esc(s.highlight)}</p>` : ''}
-    ${imps ? `<p><strong>改进建议</strong></p><ul>${imps}</ul>` : ''}
-    <p><strong>参考回答</strong></p>
+    ${s.highlight ? `<p class="highlight">${esc(s.highlight)}</p>` : ''}
+    ${imps ? `<h2>改进建议</h2><ul>${imps}</ul>` : ''}
+    <h2>参考回答</h2>
     <div class="ref">${esc(s.reference_answer)}</div>`;
 }
 
@@ -677,7 +696,7 @@ function endRound() {
   const msg = done ? `结束本轮？将根据已完成评分的 ${done} 道题生成总结。` : '结束本轮？目前还没有完成评分的题目。';
   if (!confirm(msg)) return;
   session.ended = true;
-  phase = 'idle';
+  setPhase('idle');
   clearInterval(timer);
   stopMic();
   stopSpeaking();
@@ -709,7 +728,7 @@ function renderReport() {
   const { avg, count } = averages();
   const total = DIMENSIONS.reduce((s, [k]) => s + avg[k], 0) / DIMENSIONS.length;
   const weakest = DIMENSIONS.reduce((w, d) => (avg[d[0]] < avg[w[0]] ? d : w));
-  const dimRows = DIMENSIONS.map(([k, name]) => `<tr><td>${name}</td><td>${avg[k].toFixed(1)} / 5</td></tr>`).join('');
+  const dimRows = DIMENSIONS.map(([k, name]) => `<tr><td class="dim">${name}</td><td style="width:60%"><div class="bar"><i style="width:${(avg[k] / 5) * 100}%"></i></div></td><td>${avg[k].toFixed(1)}</td></tr>`).join('');
   const qRows = session.results.map((r, i) => {
     const sc = r?.score?.scores;
     const qa = sc ? (DIMENSIONS.reduce((s, [k]) => s + (Number(sc[k]?.score) || 0), 0) / DIMENSIONS.length).toFixed(1) : '—';
@@ -717,8 +736,9 @@ function renderReport() {
     return `<tr><td>${i + 1}. ${esc(r.question.question)}</td><td>${qa}</td><td>${fmtTime(secs)}</td></tr>`;
   }).join('');
   $('reportContent').innerHTML = count ? `
-    <p>共完成 ${session.results.length} 道题，平均得分 <strong>${total.toFixed(1)} / 5</strong>。最需要加强的是 <strong>「${weakest[1]}」</strong>。</p>
-    <table class="scores"><tr><th>维度</th><th>平均分</th></tr>${dimRows}</table>
+    <div class="summary-head"><span class="big">${total.toFixed(1)}</span><span class="muted">平均分（满分 5），共 ${session.results.length} 道题</span></div>
+    <p>最需要加强的是「${weakest[1]}」。</p>
+    <table class="scores bars"><tr><th>维度</th><th></th><th>平均分</th></tr>${dimRows}</table>
     <table class="scores"><tr><th>题目</th><th>得分</th><th>用时</th></tr>${qRows}</table>
     <p class="muted">每道题的详细反馈和参考回答，可以导出为 Markdown 保存。</p>`
     : '<p>本轮没有完成评分的题目。</p>';
@@ -932,6 +952,8 @@ function init() {
   if (!settings.apiKey) $('settingsPanel').classList.remove('hidden');
 
   $('settingsBtn').onclick = () => $('settingsPanel').classList.toggle('hidden');
+  $('closeSettings').onclick = () => $('settingsPanel').classList.add('hidden');
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('settingsPanel').classList.add('hidden'); });
   $('provider').onchange = () => { $('model').value = PROVIDERS[$('provider').value].model; $('baseUrl').value = ''; };
   $('saveSettings').onclick = saveSettings;
   $('clearData').onclick = () => {
